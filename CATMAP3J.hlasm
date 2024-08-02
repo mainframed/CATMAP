@@ -7,12 +7,12 @@
 *       |____.    |        |         |
 *       |    |    |    :   |   ______:
 *       |    |    |    |   |   |     .
-*       :_________|________|___|      
-*       . Soldier     of     Fortran  
+*       :_________|________|___|
+*       . Soldier     of     Fortran
 *
 * CATMAP 3 dot oh J
 * The J stands for JCL
-* //SYSOUT DD = where you want the output to go
+* //CATOUT DD = where you want the output to go
 * R11/R12 for Addressability
 * Based *heavily* on mvs9906.pdf
 *
@@ -20,10 +20,10 @@
 * in your SYSIN.L in JCL or =4.7 in ISPF
 *
 * _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
-CHKACCSS TITLE 'CATMAP on steroids'
+CATMAP3J TITLE 'CATMAP on steroids'
          PRINT ON,DATA,GEN
-CLEAR    CSECT
-CLEAR    AMODE 31 
+CATMAP3J CSECT
+CATMAP3J AMODE 31
 * _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
          YREGS                  # Register readability macro
 * _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
@@ -32,16 +32,16 @@ M1       LR    R12,R15          # R15 Program base into R12
 M2       LA    R11,4095(R12)    # 4k-1 more of addressability
 M3       LA    R11,1(R11)       # Ahh there we go
          USING MAIN,R12,R11     # R11/R12 for addressability
-* _.-=-._ Open Output Dataset _.-=-._ 
-         OPEN  (SYSOUT,OUTPUT)
-PUT1     PUT   SYSOUT,CAT1
-PUT2     PUT   SYSOUT,CAT2
-PUT3     PUT   SYSOUT,CAT3
-PUT4     PUT   SYSOUT,CAT4
-PUT5     PUT   SYSOUT,CAT5
-PUT6     PUT   SYSOUT,CAT6
-PUT7     PUT   SYSOUT,CAT7
-PUT8     PUT   SYSOUT,ACCESS   # LOL Newline
+* _.-=-._ Open Output Dataset _.-=-._
+         OPEN  (CATOUT,OUTPUT)
+PUT1     PUT   CATOUT,CAT1
+PUT2     PUT   CATOUT,CAT2
+PUT3     PUT   CATOUT,CAT3
+PUT4     PUT   CATOUT,CAT4
+PUT5     PUT   CATOUT,CAT5
+PUT6     PUT   CATOUT,CAT6
+PUT7     PUT   CATOUT,CAT7
+PUT8     PUT   CATOUT,ACCESS   # LOL Newline
 * _.-=-._ Get the master catalog _.-=-._
          L     R5,X'10'        # CVT
          L     R5,X'8C'(R5)    # ECVT
@@ -53,6 +53,10 @@ PUT8     PUT   SYSOUT,ACCESS   # LOL Newline
 * Alright lets get some UCATS!
 * First we get storage for IGGCSI00
 * _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
+**
+* TODO CDR 8.2.2024 - THIS # 32767 IS arbitrary,
+*      How to make it make logical sense?
+**
          GETMAIN RC,LV=32767 # Gets storage
 *                            # And puts the location in R1
 A1       LTR   R15,R15       # Check return code
@@ -69,13 +73,14 @@ A3       ST    R1,PARMRWK    # Store the location in PARMRWK
          MVI   CSIS1CAT,C'Y'      # Only search the master catalog
          MVI   CSIRESRV,X'00'     # LOL IBM WUT
          MVI   CSINUMEN,X'0'     # We dont need extra fields just yet
-* _.-=-._ Time to call IGGCSI00 _.-=-._         
+* _.-=-._ Time to call IGGCSI00 _.-=-._
          LA    R1,PARMLIST        # Put the location PLIST in R1
          CALL  IGGCSI00           # Call Catalog Search Interface
 T1       LTR   R15,R15            # Is there a problem?
 T2       BZ    RDUCAT             # Nope
 T3       CLC   CSIMRR(4),FENTERR  # If 04/64 then its a simple error
 T4       BNE   ERRORMAN           # Welp couldnt do that
+*  ------------
 SAVEMCAT LA    R9,UCATTAB         # Put the location in R9
          MVC   0(44,R9),UCATNAME   # Put the MSTCAT as the first entry
          LA    R9,44(R9)          # Advance R9 to the next location
@@ -93,7 +98,7 @@ GETUCAT  DS    0H
          BL    GETUCAT            # No we are not
          MVI   0(R9),X'FF'        # Egg marking the end of UCATTABL
          L     R2,PARMRWK         # Put the pointer in R2
-         FREEMAIN RC,LV=32767,A=(2) # Free it up
+*        FREEMAIN RC,LV=32767,A=(2) # Free it up
          DROP  R5,R7
 * _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
 * We now have a list of User Catalogs in UCATTAB
@@ -104,7 +109,7 @@ GETUCAT  DS    0H
 MAINLOOP CLI   0(R9),X'FF'        # Compare the bye, is it FF?
          BE    ENDPRGM            # Yes, get outta here
          MVC   UCATNAME,0(R9)     # Current Catalog
-* _.-=-._ Get this Catalog Entries _.-=-._         
+* _.-=-._ Get this Catalog Entries _.-=-._
          GETMAIN RC,LV=65535      # Get some space
          LTR   R15,R15            # Did it work?
          BNZ   ERRORMAN           # NOOOOOOPE
@@ -122,14 +127,14 @@ MAINLOOP CLI   0(R9),X'FF'        # Compare the bye, is it FF?
          MVC   CSINUMEN,=H'1'     # We need one extra field
          MVC   CSIFLDNM,=CL8'VOLSER  ' # We want the VOLUME now too
 CSILOOP  EQU *
-* _.-=-._ Time to call IGGCSI00 _.-=-._         
+* _.-=-._ Time to call IGGCSI00 _.-=-._
          LA    R1,PARMLIST        # Put the location PLIST in R1
          CALL  IGGCSI00           # Call Catalog Search Interface
 C1       LTR   R15,R15            # Is there a problem?
 C2       BZ    CONT               # Nope
 C3       CLC   CSIMRR(4),FENTERR  # If 04/64 then its a simple error
-C4       BNE   ERRORMAN           # Welp couldnt do that     
-* _.-=-._ Work with the CSI Data _.-=-._         
+C4       BNE   ERRORMAN           # Welp couldnt do that
+* _.-=-._ Work with the CSI Data _.-=-._
 CONT     L     R5,PARMRWK         # Load GETMAIN storage address in R5
          USING CSIRWORK,R5        # Make it addressable
          TM    CSICFLG,B'0100000' # CSINOENT no entries? Ugh
@@ -138,11 +143,11 @@ CONT     L     R5,PARMRWK         # Load GETMAIN storage address in R5
          A     R6,CSIUSDLN        # R6 now points to end of CSI
          LA    R7,CSIRWORL(R5)    # R7 now points to CSIRWENT
          USING CSIRWENT,R7        # And make it addressable
-ENTRLOOP DS    0H         
+ENTRLOOP DS    0H
          MVC   UDATASET,CSIENAME
          LA    R8,CSIRWENL(R7)    # R8 now points to fields
 *         LH    R2,0(R8)           # Load length (CSILENFD) in R2
-* TODO: Add multi volume support         
+* TODO: Add multi volume support
          LA    R8,2(R8)           # R8 points to VOLSER
          MVC   UVOLSER,0(R8)      # Put it in UVOLSER
 * _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
@@ -150,29 +155,30 @@ ENTRLOOP DS    0H
 * its time to check access to it
 * _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
          B     CHKACCSS
-DONECHK  PUT   SYSOUT,ACCESS
+DONECHK  PUT   CATOUT,ACCESS
 * _.-=-._ Now Check to see if theres more entries _.-=-._
 NEXTENTR LA    R7,CSIRWENL(R7)    # Point R7 at next entry
          AH    R7,0(R7)           # Add the fields
          LA    R7,2(R7)           # Next Entry
          CR    R7,R6              # Have we surpased CSIUSDLN?
          BL    ENTRLOOP           # Nope go again
-* _.-=-._ Are there more entries than our work area? _.-=-._         
+* _.-=-._ Are there more entries than our work area? _.-=-._
          CLI   CSIRESUM,C'Y'      # Compare
          BE    CSILOOP            # Yes there area
-* _.-=-._ Looks like we're done with this catalog _.-=-._         
+* _.-=-._ Looks like we're done with this catalog _.-=-._
 NOENTRY  L     R2,PARMRWK         # Store the address in R2
-         FREEMAIN RC,LV=65535,A=(2) # Free it up
+*        FREEMAIN RC,LV=65535,A=(2) # Free it up
          LA    R9,UCATTABL(R9)    # Get the next Catalog Entry
          B     MAINLOOP           # Loop it up
 * _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
 * ERROR WILL ROBINSON
-ERRORMAN PUT   SYSOUT,ERRORMSG
+ERRORMAN PUT   CATOUT,ERRORMSG
 * _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
 * We're done here, get the heck out
 ENDPRGM  DS    0H           # We're done lets exit
          XR    R15,R15      # zero return code
          PR    ,            # Return to caller
+         LTORG ,            # put our constants here
 * _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
 * Checks access to a dataset
 * _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
@@ -209,7 +215,7 @@ CHECKRTN DS    0H           # Check SAF Return Code in R15
          B     DONECHK
 CHECKACS DS    0H
          C     R3,=F'20'    # Is the SAF return code 0x14?
-         BNE   ERROR        # No? Then we dont care   
+         BNE   ERROR        # No? Then we dont care
 NOACCESS C     R4,=F'0'     # Do we have no access?
          BNE   READ         # We dont? try READ
          MVC   ACCESS,NONEA
@@ -230,7 +236,7 @@ ALTER    C     R4,=F'16'    # Do we have alter?
          BNE   ERROR        # Dang, well then we have a problem
          MVC   ACCESS,ALTERA
          B DONECHK
-ERROR    MVC   ACCESS,ERRORA 
+ERROR    MVC   ACCESS,ERRORA
          B     DONECHK
 * Work stuff
 UCATNAME DS    CL44' '
@@ -239,9 +245,9 @@ SPACED   DS    CL1
 UVOLSER  DS    CL6
 SPACED2  DS    CL1
 UDATASET DS    CL44
-* _.-=-._ Dope ass logo _.-=-._ 
+* _.-=-._ Dope ass logo _.-=-._
 CAT1     DC C'   _______  _______  _______ '
-CAT12    DC C' __   __  _______  _______    ' 
+CAT12    DC C' __   __  _______  _______    '
 CAT2     DC C'  |       ||   _   ||       |'
 CAT22    DC C'|  |_|  ||   _   ||       |   '
 CAT3     DC C'  |       ||  |_|  ||_     _|'
@@ -257,7 +263,7 @@ CAT72    DC C'|_|   |_||__| |__||___|       '
 * _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
 ERRORMSG DC CL59'ERROR '
 FENTERR  DC    XL4'C6E20464'
-SYSOUT   DCB   DDNAME=SYSOUT,DSORG=PS,MACRF=PM,                        x
+CATOUT   DCB   DDNAME=CATOUT,DSORG=PS,MACRF=PM,                        x
                RECFM=FB,LRECL=59
 * _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
 * User Catalog Storage Table
