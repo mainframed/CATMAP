@@ -27,8 +27,6 @@
 * R11 - Main Program Addressability (far)
 * R12 - Main Program Addressability (near)
 **
-* TODO CR - MAKE INTO BAL R10,FORMAT
-**
 *
 * Based *heavily* on mvs9906.pdf
 *
@@ -134,7 +132,6 @@ ALCUCTAB DS    0h
          BR    R10                     Return
 ***********************************************************************
 * Builds a table with all cats (mast + all ucats
-*  CR TODO - need error checking for each cat return
 ***********************************************************************
 BLDCATAB DS    0h
          L     R9,UCATTAB              Load ucat table add into R9
@@ -227,6 +224,7 @@ LOOPCAT3 DS    0H
          L     R5,PARMWRK              GETMAIN storage address in R5
          USING CSIRWORK,R5             Make it addressable
 *
+* CDR TODO - SHOULD THIS BE A CONSTANT?
          TM    CSICFLG,B'0100000'      CSINOENT no entries? Ugh
          BO    NOENTRY                 Skip this catalog then i guess
          LR    R6,R5                   Set R6 to work location
@@ -275,13 +273,36 @@ OUT101   ABEND X'101'
 OUT102   ABEND X'102'
 OUT103   ABEND X'103'
 OUT104   ABEND X'104'
+OUT105   ABEND X'105'
+OUT106   ABEND X'106'
 *
 ***********************************************************************
 * We're done here, get the heck out
 ***********************************************************************
 *
 ENDPRGM  DS    0H                      We're done lets exit
-*need cleanup drops and frees
+         DROP  R5,R7                   Won't need these anymore
+*
+         XR    R1,R1                   zero out r1
+         XR    R2,R2                   zero out r2
+*
+         L     R1,PARMWRK              Get add to free
+         L     R2,0(0,R1)              Size of area
+         FREEMAIN RC,LV=(R2),A=(R1)    free it up
+*
+         LTR   R15,R15                 works?
+         BNZ   OUT105                  errr owt
+*
+         XR    R1,R1                   zero out r1
+         XR    R2,R2                   zero out r2
+*
+         L     R1,UCATTAB              Get add to free
+         L     R2,UCATTABL             Size of area
+         FREEMAIN RC,LV=(R2),A=(R1)    free it up
+*
+         LTR   R15,R15                 works?
+         BNZ   OUT106                  errr owt
+*
          XR    R15,R15                 zero return code
          PR    ,                       Return to caller
          LTORG ,                       put our constants here
@@ -309,8 +330,6 @@ SAFCHK   RACROUTE REQUEST=AUTH,                                        x
 * x8   = UPDATE
 * xC   = CONTROL (same as UPDATE on non-vsam datasets thanks EM)
 * x10  = ALTER
-*
-* CR TODO need to go through the RC checking logic here
 *
 ***********************************************************************
 *
@@ -427,7 +446,6 @@ CATOUT   DCB   DDNAME=CATOUT,DSORG=PS,MACRF=PM,                        x
 *
 ***********************************************************************
 * User Catalog Storage Table
-* CR TODO - NEED TO MAKE THIS MORE ACCURATE
 ***********************************************************************
 *
 UCATTAB  DS    A                       Catalog table (mast+user)
@@ -447,9 +465,8 @@ PARMWRK  DS    A                       Work area
 * CR todo - need to fix the below to something logical
 MAXSIZE  DC    F'65535'                size for get mains
 MSL      EQU   MAXSIZE
-*   CSI Error CR TODO need to fix this
 *
-FENTERR  DC    XL4'C6E20464'
+FENTERR  DC    XL4'C6E20464'           basic 04 + 100 rsn
 *
 * CSIDTYPD/CSIETYPE Info:
 * A Non-VSAM data set
