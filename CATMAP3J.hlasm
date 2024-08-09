@@ -36,7 +36,7 @@
 * in your SYSIN.L in JCL or =4.7 in ISPF
 *
 *
-CATMAP3J TITLE 'CATMAP on steroids'
+CATMAP3J TITLE 'CATMAP on whatever phils having'
          PRINT ON,DATA,GEN
 CATMAP3J CSECT
 CATMAP3J AMODE 31
@@ -170,6 +170,13 @@ LOOPCAT0 CLI   0(R9),X'FF'             Compare the bye is it FF?
          BZR   R10                     Yes get outta here
          MVC   UCATNAME,0(R9)          Current Catalog
 *
+         XC    ERRORMSG(ERRMSGL),ERRORMSG  clear it out
+         MVC   ERRORMSG,=CL59'CAT:'    Show the cat we're working on
+         LA    R1,ERRORMSG             load error output (rename this)
+         MVC   4(UCATENTL,R1),UCATNAME load cat name
+*            
+         PUT   CATOUT,ERRORMSG         add message
+*
 LOOPCAT1 DS    0h                      clear out usable areas
          XR    R0,R0                   zero r0
          XR    R1,R1                   zero r1
@@ -206,17 +213,14 @@ CSILOOP  EQU *
          BZ    LOOPCAT3                NO, let's roll
 *
          CLC   CSIMRR(4),FENTERR       If 04/64 then its a simple error
-** TODO ADD RSN/RC TO THIS
          BZ    LOOPCAT3                we good, move on
 * PUT SOME ERROR MESSAGES OUT
          XC    ERRORMSG(ERRMSGL),ERRORMSG  clear it out
-         MVC   ERRORMSG,=CL59'#### ERROR WITH CAT:'
-         PUT   CATOUT,ERRORMSG         add custom message
-*
-         XC    ERRORMSG(ERRMSGL),ERRORMSG  clear it out
-         MVC   ERRORMSG(UCATENTL),UCATNAME  add cat name
-         PUT   CATOUT,ERRORMSG         some error with cat, move on
-*
+         MVC   ERRORMSG,=CL4'ERR:'    Show the cat we're working on
+         LA    R1,ERRORMSG             load error output (rename this)
+         MVC   4(UCATENTL,R1),UCATNAME load cat name
+*            
+         PUT   CATOUT,ERRORMSG         add message
          B     NOENTRY                 GO TO NEXT CAT
 * Work with the CSI Data
 LOOPCAT3 DS    0H
@@ -243,7 +247,7 @@ ENTRLOOP DS    0H
 * its time to check access to it
 *
          BAL   R2,CHKACCSS             check our access
-DONECHK  PUT   CATOUT,ACCESS
+         PUT   CATOUT,ACCESS
 * Now Check to see if theres more entries
 NEXTENTR LA    R7,CSIRWENL(R7)         Point R7 at next entry
          AH    R7,0(R7)                Add the fields
@@ -295,24 +299,6 @@ SAFCHK   RACROUTE REQUEST=AUTH,                                        x
                ENTITY=UDATASET,VOLSER=UVOLSER,                         x
                WORKA=SAFWORKA
          LM    R3,R4,SAFCHK+4       Save Return Code, Rsn Code in R3/R4
-         BR    R2                      return
-*
-***********************************************************************
-* show logo routine
-***********************************************************************
-*
-SHOWLOGO DS    0h
-PUT1     PUT   CATOUT,CAT1
-PUT2     PUT   CATOUT,CAT2
-PUT3     PUT   CATOUT,CAT3
-*
-PUT4     PUT   CATOUT,CAT4
-PUT5     PUT   CATOUT,CAT5
-PUT6     PUT   CATOUT,CAT6
-*
-PUT7     PUT   CATOUT,CAT7
-PUT8     PUT   CATOUT,ACCESS           Newline
-         BR    R10                     Return
 *
 ***********************************************************************
 * SAF Return Codes (when R15 is 0 and R3 is x14)
@@ -332,36 +318,62 @@ CHECKRTN DS    0H                      Check SAF Return Code in R15
          C     R15,=F'0'               If its zero check RACF RC
          BE    CHECKACS
          C     R15,=F'4'               Otherwise is the SAF RC 4?
-         BNE   ERROR                   Then its 8 or 64 and thats bad
+*
+         BNE   ACCERR                  Then its 8 or 64 and thats bad
          C     R3,=F'4'                resource is not protected
          BNE   NOACCESS                We get no access (if rc is 8)
+*
          MVC   ACCESS,NOTPROTA         dataset is not protected
-         B     DONECHK
+         BR    R2                      return
+*
 CHECKACS DS    0H
          C     R3,=F'20'               Is the SAF return code 0x14?
-         BNE   ERROR                   No? Then we dont care
+         BNE   ACCERR                  No? Then we dont care
+*
 NOACCESS C     R4,=F'0'                Do we have no access?
          BNE   READ                    We dont? try READ
          MVC   ACCESS,NONEA
-         B     DONECHK
+         BR    R2                      return
+*
 READ     C     R4,=F'4'                Do we have read?
          BNE   UPDATE                  No try UPDATE
          MVC   ACCESS,READA
-         B     DONECHK
+         BR    R2                      return
+*
 UPDATE   C     R4,=F'8'                Do we have update?
          BNE   CONTROL                 Nope, try control
          MVC   ACCESS,UPDATEA
-         B DONECHK
+         BR    R2                      return
+*
 CONTROL  C     R4,=F'12'               Do we have control?
          BNE   ALTER                   Nope, last chance, try alter
          MVC   ACCESS,CONTROLA
-         B     DONECHK
+         BR    R2                      return
+*
 ALTER    C     R4,=F'16'               Do we have alter?
-         BNE   ERROR                   well then we have a problem
+         BNE   ACCERR                  well then we have a problem
          MVC   ACCESS,ALTERA
-         B DONECHK
-ERROR    MVC   ACCESS,ERRORA
-         B     DONECHK
+         BR    R2                      return
+*
+ACCERR   MVC   ACCESS,ERRORA           output error
+         BR    R2                      return
+***********************************************************************
+* show logo routine
+***********************************************************************
+*
+SHOWLOGO DS    0h
+PUT1     PUT   CATOUT,CAT1
+PUT2     PUT   CATOUT,CAT2
+PUT3     PUT   CATOUT,CAT3
+*
+PUT4     PUT   CATOUT,CAT4
+PUT5     PUT   CATOUT,CAT5
+PUT6     PUT   CATOUT,CAT6
+*
+PUT7     PUT   CATOUT,CAT7
+PUT8     PUT   CATOUT,ACCESS           Newline
+         BR    R10                     Return
+*
 ***********************************************************************
 * end of program
 * Working variables and things and stuff
