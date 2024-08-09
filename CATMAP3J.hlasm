@@ -50,8 +50,7 @@ MAIN     BAKR  R14,0                   Save regs linkage stack
 ***********************************************************************
 *
          BAL   R10,SETUP               Do some housekeeping setup
-*  need to fix the logo (sorry phil) broke when we moved it
-*        BAL   R10,SHOWLOGO            Show off our pretty logo
+         BAL   R10,SHOWLOGO            Show off our pretty logo
          BAL   R10,GETMCAT             Get name of mastercat
          BAL   R10,LDUCATS             Load up the User Cats
          BAL   R10,ALCUCTAB            Allocate our catalog table
@@ -167,12 +166,12 @@ LOOPCAT0 CLI   0(R9),X'FF'             Compare the bye is it FF?
          BZR   R10                     Yes get outta here
          MVC   UCATNAME,0(R9)          Current Catalog
 *
-         XC    ERRORMSG(ERRMSGL),ERRORMSG  clear it out
-         MVC   ERRORMSG,=CL59'CAT:'    Show the cat we're working on
-         LA    R1,ERRORMSG             load error output (rename this)
+         XC    MSGOUT(MSGOUTL),MSGOUT  clear it out
+         MVC   MSGOUT,=CL59'CAT:'      Show the cat we're working on
+         LA    R1,MSGOUT               load error output (rename this)
          MVC   4(UCATENTL,R1),UCATNAME load cat name
 *            
-         PUT   CATOUT,ERRORMSG         add message
+         PUT   CATOUT,MSGOUT           add message
 *
 LOOPCAT1 DS    0h                      clear out usable areas
          XR    R0,R0                   zero r0
@@ -212,12 +211,12 @@ CSILOOP  EQU *
          CLC   CSIMRR(4),FENTERR       If 04/64 then its a simple error
          BZ    LOOPCAT3                we good, move on
 * PUT SOME ERROR MESSAGES OUT
-         XC    ERRORMSG(ERRMSGL),ERRORMSG  clear it out
-         MVC   ERRORMSG,=CL4'ERR:'    Show the cat we're working on
-         LA    R1,ERRORMSG             load error output (rename this)
+         XC    MSGOUT(MSGOUTL),MSGOUT  clear it out
+         MVC   MSGOUT,=CL4'ERR:'       Show the cat we're working on
+         LA    R1,MSGOUT               load error output (rename this)
          MVC   4(UCATENTL,R1),UCATNAME load cat name
 *            
-         PUT   CATOUT,ERRORMSG         add message
+         PUT   CATOUT,MSGOUT           add message
          B     NOENTRY                 GO TO NEXT CAT
 * Work with the CSI Data
 LOOPCAT3 DS    0H
@@ -266,8 +265,6 @@ NOENTRY  DS    0h
 * All the errors go here
 ***********************************************************************
 *
-ERRORMAN PUT   CATOUT,ERRORMSG
-         ABEND X'200'
 OUT100   ABEND X'100'                  Nope
 OUT101   ABEND X'101'
 OUT102   ABEND X'102'
@@ -282,6 +279,11 @@ OUT106   ABEND X'106'
 *
 ENDPRGM  DS    0H                      We're done lets exit
          DROP  R5,R7                   Won't need these anymore
+*
+         XC    MSGOUT(MSGOUTL),MSGOUT  clear it out
+         MVC   MSGOUT,=CL59'END:  DUMP OF CATALOGS IS COMPLETE'
+*            
+         PUT   CATOUT,MSGOUT           add message         
 *
          XR    R1,R1                   zero out r1
          XR    R2,R2                   zero out r2
@@ -424,8 +426,8 @@ CAT72    DC C'|_|   |_||__| |__||___|       '
 ***********************************************************************
 * Variables, constants, dsects and so much more!
 ***********************************************************************
-ERRORMSG DC    CL59'ERROR '            CUSTOM ERROR MSG SPACE
-ERRMSGL  EQU   *-ERRORMSG              Length of error msg
+MSGOUT   DC    CL59'ERROR '            CUSTOM ERROR MSG SPACE
+MSGOUTL  EQU   *-MSGOUT                Length of error msg
 *
 * RACROUTE Work Area
 *
