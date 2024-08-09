@@ -166,11 +166,11 @@ GETUCAT  DS    0H                      Loop to load UCATs into table
 LOOPCATS DS    0h
          L     R9,UCATTAB              Reset R9 to point to UCATTAB
 *
-MAINLOOP CLI   0(R9),X'FF'             Compare the bye is it FF?
+LOOPCAT0 CLI   0(R9),X'FF'             Compare the bye is it FF?
          BZR   R10                     Yes get outta here
          MVC   UCATNAME,0(R9)          Current Catalog
 *
-CLRAREA  DS    0h
+LOOPCAT1 DS    0h                      clear out usable areas
          XR    R0,R0                   zero r0
          XR    R1,R1                   zero r1
 *
@@ -180,6 +180,7 @@ CLRAREA  DS    0h
 *
 * Now we setup the parms for IGGCSI00 (again)
 *
+LOOPCAT2 DS    0h
          L     R3,MAXSIZE              set up first param (size)
          L     R1,PARMWRK              load up work area
          ST    R3,0(R1)                store the length in the new stg
@@ -202,12 +203,23 @@ CSILOOP  EQU *
 *
          CALL  IGGCSI00                Call Catalog Search Interface
          LTR   R15,R15                 Is there a problem?
-         BZ    LOOPCAT0                NO, let's roll
+         BZ    LOOPCAT3                NO, let's roll
 *
          CLC   CSIMRR(4),FENTERR       If 04/64 then its a simple error
-         BNZ   OUT101                  let's exit
+** TODO ADD RSN/RC TO THIS
+         BZ    LOOPCAT3                we good, move on
+* PUT SOME ERROR MESSAGES OUT
+         XC    ERRORMSG(ERRMSGL),ERRORMSG  clear it out
+         MVC   ERRORMSG,=CL59'#### ERROR WITH CAT:'
+         PUT   CATOUT,ERRORMSG         add custom message
+*
+         XC    ERRORMSG(ERRMSGL),ERRORMSG  clear it out
+         MVC   ERRORMSG(UCATENTL),UCATNAME  add cat name
+         PUT   CATOUT,ERRORMSG         some error with cat, move on
+*
+         B     NOENTRY                 GO TO NEXT CAT
 * Work with the CSI Data
-LOOPCAT0 DS    0H
+LOOPCAT3 DS    0H
          L     R5,PARMWRK              GETMAIN storage address in R5
          USING CSIRWORK,R5             Make it addressable
 *
@@ -246,13 +258,13 @@ NEXTENTR LA    R7,CSIRWENL(R7)         Point R7 at next entry
 *
 NOENTRY  DS    0h
          LA    R9,UCATENTL(R9)         Get the next Catalog Entry
-         B     MAINLOOP                Loop it up
+         B     LOOPCAT0                Loop it up
 *
 ***********************************************************************
 * All the errors go here
 ***********************************************************************
 *
-ERRORMAN PUT   CATOUT,ERRORMSG 
+ERRORMAN PUT   CATOUT,ERRORMSG
          ABEND X'200'
 OUT100   ABEND X'100'                  Nope
 OUT101   ABEND X'101'
@@ -305,7 +317,6 @@ PUT8     PUT   CATOUT,ACCESS           Newline
 ***********************************************************************
 * SAF Return Codes (when R15 is 0 and R3 is x14)
 *
-*
 * R4 is one of the following:
 * x0   = No Access
 * x4   = READ
@@ -355,6 +366,7 @@ ERROR    MVC   ACCESS,ERRORA
 * end of program
 * Working variables and things and stuff
 ***********************************************************************
+DBG1     DC    CL8'UCATNAME'
 UCATNAME DS    CL44' '
 ACCESS   DS    CL7
 SPACED   DS    CL1
@@ -381,7 +393,8 @@ CAT72    DC C'|_|   |_||__| |__||___|       '
 ***********************************************************************
 * Variables, constants, dsects and so much more!
 ***********************************************************************
-ERRORMSG DC    CL59'ERROR '
+ERRORMSG DC    CL59'ERROR '            CUSTOM ERROR MSG SPACE
+ERRMSGL  EQU   *-ERRORMSG              Length of error msg
 *
 * RACROUTE Work Area
 *
