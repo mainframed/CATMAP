@@ -223,9 +223,12 @@ LOOPCAT3 DS    0H
          L     R5,PARMWRK              GETMAIN storage address in R5
          USING CSIRWORK,R5             Make it addressable
 *
-* CDR TODO - SHOULD THIS BE A CONSTANT?
-         TM    CSICFLG,B'0100000'      CSINOENT no entries? Ugh
-         BO    NOENTRY                 Skip this catalog then i guess
+         XR    R1,R1                   zero r1
+         LB    R1,CSINOENT             load our test flag
+         EX    R1,TESTENT              execute our test
+*
+TESTENT  TM    CSICFLG,0               see if the flag matches
+         BNZ   OUT107
          LR    R6,R5                   Set R6 to work location
 *
          A     R6,CSIUSDLN             R6 now points to end of CSI
@@ -272,6 +275,7 @@ OUT103   ABEND X'103'
 OUT104   ABEND X'104'
 OUT105   ABEND X'105'
 OUT106   ABEND X'106'
+OUT107   ABEND X'107F'
 *
 ***********************************************************************
 * We're done here, get the heck out
@@ -464,7 +468,6 @@ PARMWRK  DS    A                       Work area
 * Parameters for IGGCSI00
 ***********************************************************************
 *
-* CR todo - need to fix the below to something logical
 MAXSIZE  DC    F'65535'                size for get mains
 MSL      EQU   MAXSIZE
 *
@@ -516,7 +519,35 @@ CSIRTNC  DC    XL1'00'                 Return Code
 * CSI Work Area
 ***********************************************************************
 *
+*************** constants for CSI ***************
+*
+***********************************************************************
+* CSICFLG bits for each Catalog returns
+***********************************************************************
+CSINTICF DC    B'10000000'             Not supported.
+CSINOENT DC    B'01000000'             No entry found for this cat
+CSINTCMP DC    B'00100000'             Data gotton for this catalog
+*                                      is not complete.
+CSICERR  DC    B'00010000'             Whole catalog not processed
+*                                      due to error.
+CSICERRP DC    B'00001000'             Catalog partially processed
+*
+***********************************************************************
+*  CSIEFLAG bits for each entry
+***********************************************************************
+CSIPMENT DC    B'10000000'             Primary entry.
+*        a 0 in the left bit above means entry is associated
+*        with the previous primary entry
+CSIENTER DC    B'01000000'             Error indication is set for this
+*                           entry and error code follows CSIENAME
+CSIEDATF DC    B'00100000'             Data is returned for this entry
+***********************************************************************
+*
+******   CSI DSECT STARTS HERE *****
+* 
+***********************************************************************
 CSIRWORK DSECT
+*
 ***********************************************************************
 * Information returned for work area
 ***********************************************************************
@@ -529,30 +560,19 @@ CSINUMFD DS    H                       Number of field names + 1
 ***********************************************************************
 CSICFLG  DS    CL1                     Catalog flag information
 CSICTYPE DS    CL1                     Catalog type. X'F0'
-CSICNAME DC    CL44' '                 Catalog Name
+CSICNAME DS    CL44                    Catalog Name
 CSICRETN DS    0XL4                    Return information for Catalog
 CSICRETM DS    XL2                     Catalog return module ID
 CSICRETR DS    XL1                     Catalog return reason code
 CSICRETC DS    XL1                     Catalog return code
 CSIRWORL EQU   *-CSIRWORK              Length of structure
 ***********************************************************************
-* CSICFLG bits for each Catalog returns
-***********************************************************************
-CSINTICF DC    B'10000000'             Not supported.
-CSINOENT DC    B'01000000'             No entry found for this cat
-CSINTCMP DC    B'00100000'             Data gotton for this catalog
-*                                      is not complete.
-CSICERR  DC    B'00010000'             Whole catalog not processed
-*                                      due to error.
-CSICERRP DC    B'00001000'             Catalog partially processed
-*                                      due to error.
-***********************************************************************
 * Information returned for each entry
 ***********************************************************************
 CSIRWENT DSECT
 CSIEFLAG DS    XL1                     Entry flag information
 CSIETYPE DS    XL1                     Entry Type
-CSIENAME DC    CL44' '                 Entry Name
+CSIENAME DS    CL44                    Entry Name
 CSIRETN  DS    0XL4                    Return information for Catalog
 CSIERETM DS    XL2                     Entry return module ID
 CSIERETR DS    XL1                     Entry return reason code
@@ -560,15 +580,6 @@ CSIERETC DS    XL1                     Entry return code
 CSIEDATA DS    0CL4                    Returned data entry - this
 *                                      only exists if CSIENTER is 0
 CSIRWENL EQU   *-CSIRWENT              Length of structure W/O fields
-***********************************************************************
-*  CSIEFLAG bits for each entry
-***********************************************************************
-CSIPMENT DC    B'10000000'             Primary entry.
-*        a 0 in the left bit above means entry is associated
-*        with the previous primary entry
-CSIENTER DC    B'01000000'             Error indication is set for this
-*                                 entry and error code follows CSIENAME
-CSIEDATF DC    B'00100000'             Data is returned for this entry
 ***********************************************************************
 *  csiedata contents which assume CSIOPTNS IS NOT F
 ***********************************************************************
