@@ -1,4 +1,4 @@
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
+*
 *
 *       .                  .         .
 *       .___________       ._________.
@@ -7,175 +7,316 @@
 *       |____.    |        |         |
 *       |    |    |    :   |   ______:
 *       |    |    |    |   |   |     .
-*       :_________|________|___|      
-*       . Soldier     of     Fortran  
+*       :_________|________|___|
+*       . Soldier     of     Fortran
 *
 * CATMAP 3 dot oh J
 * The J stands for JCL
-* //SYSOUT DD = where you want the output to go
-* R11/R12 for Addressability
+* //CATOUT DD = where you want the output to go
+*
+* R1  - Plists
+* R2  - working / gen use
+* R3  - working / gen use / stg size
+* R4  - saf use / gen use
+* R5  - CSIRWRK
+* R6  - working / gen use
+* R7  - CSIRWENT
+* R8
+* R9
+* R10 - BAL REG
+* R11 - Main Program Addressability (far)
+* R12 - Main Program Addressability (near)
+**
+*
 * Based *heavily* on mvs9906.pdf
 *
 * To compile you need to use SYS1.LINKLIB(IGGCSI00)
 * in your SYSIN.L in JCL or =4.7 in ISPF
 *
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
-CHKACCSS TITLE 'CATMAP on steroids'
+*
+CATMAP3J TITLE 'CATMAP on whatever phils having'
          PRINT ON,DATA,GEN
-CLEAR    CSECT
-CLEAR    AMODE 31 
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
-         YREGS                  # Register readability macro
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
-MAIN     BAKR  R14,0            # Save regs linkage stack
-M1       LR    R12,R15          # R15 Program base into R12
-M2       LA    R11,4095(R12)    # 4k-1 more of addressability
-M3       LA    R11,1(R11)       # Ahh there we go
-         USING MAIN,R12,R11     # R11/R12 for addressability
-* _.-=-._ Open Output Dataset _.-=-._ 
-         OPEN  (SYSOUT,OUTPUT)
-PUT1     PUT   SYSOUT,CAT1
-PUT2     PUT   SYSOUT,CAT2
-PUT3     PUT   SYSOUT,CAT3
-PUT4     PUT   SYSOUT,CAT4
-PUT5     PUT   SYSOUT,CAT5
-PUT6     PUT   SYSOUT,CAT6
-PUT7     PUT   SYSOUT,CAT7
-PUT8     PUT   SYSOUT,ACCESS   # LOL Newline
-* _.-=-._ Get the master catalog _.-=-._
-         L     R5,X'10'        # CVT
-         L     R5,X'8C'(R5)    # ECVT
-         L     R5,X'188'(R5)   # ECVTIPA
-* At this point the catalog is 235 bytes from ECVTIPA
-         MVC UCATNAME(44),234(R5) # Master Catalog
-         SR R5,R5              # Zero out R5
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
-* Alright lets get some UCATS!
-* First we get storage for IGGCSI00
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
-         GETMAIN RC,LV=32767 # Gets storage
-*                            # And puts the location in R1
-A1       LTR   R15,R15       # Check return code
-A2       BNZ   ERRORMAN      # Welp couldnt do that
-A3       ST    R1,PARMRWK    # Store the location in PARMRWK
-         MVC   0(4,R1),=F'32767' # Put the length at the begining
-* _.-=-._ Now we setup the parms for IGGCSI00 _.-=-._
-         MVI   CSIFIELD,C' ' # Clear out the first bytes
-         MVC   CSIFIELD+1(CSIFIELL-1),CSIFIELD # replace it all
-         MVC   CSIFILTK(2),=C'**' # Select All
-         MVC   CSICATNM,UCATNAME   # Use the master catalog
-         MVI   CSIDTYPS,C'U'      # We only want ucats
-         MVI   CSICLDI,C'Y'       # Match clusters
-         MVI   CSIS1CAT,C'Y'      # Only search the master catalog
-         MVI   CSIRESRV,X'00'     # LOL IBM WUT
-         MVI   CSINUMEN,X'0'     # We dont need extra fields just yet
-* _.-=-._ Time to call IGGCSI00 _.-=-._         
-         LA    R1,PARMLIST        # Put the location PLIST in R1
-         CALL  IGGCSI00           # Call Catalog Search Interface
-T1       LTR   R15,R15            # Is there a problem?
-T2       BZ    RDUCAT             # Nope
-T3       CLC   CSIMRR(4),FENTERR  # If 04/64 then its a simple error
-T4       BNE   ERRORMAN           # Welp couldnt do that
-SAVEMCAT LA    R9,UCATTAB         # Put the location in R9
-         MVC   0(44,R9),UCATNAME   # Put the MSTCAT as the first entry
-         LA    R9,44(R9)          # Advance R9 to the next location
-RDUCAT   L     R5,PARMRWK         # Load GETMAIN storage address in R5
-         USING CSIRWORK,R5        # Make it addressable
-RDUCAT2  LR    R6,R5              # Also set R6 to GETMAIN location
-RDUCAT3  A     R6,CSIUSDLN        # R6 now points to end of data
-         LA    R7,CSIRWORL(R5)    # R7 now points to CSIRWENT
-         USING CSIRWENT,R7        # And make it addressable
-GETUCAT  DS    0H
-         MVC   0(44,R9),CSIENAME  # Store it in our table
-         LA    R9,44(R9)          # Advance the table pointer
-         LA    R7,CSIRWENL(R7)    # Go to Next Entry
-         CR    R7,R6              # R6 is total, are we less than?
-         BL    GETUCAT            # No we are not
-         MVI   0(R9),X'FF'        # Egg marking the end of UCATTABL
-         L     R2,PARMRWK         # Put the pointer in R2
-         FREEMAIN RC,LV=32767,A=(2) # Free it up
-         DROP  R5,R7
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
+CATMAP3J CSECT
+CATMAP3J AMODE 31
+*
+MAIN     BAKR  R14,0                   Save regs linkage stack
+         LR    R12,R15                 R15 Program base into R12
+         LA    R11,4095(R12)           4k-1 more of addressability
+         LA    R11,1(R11)              Ahh there we go
+         USING MAIN,R12,R11            R11/R12 for addressability
+*
+***********************************************************************
+* Begin primary program stuffs
+***********************************************************************
+*
+         BAL   R10,SETUP               Do some housekeeping setup
+         BAL   R10,SHOWLOGO            Show off our pretty logo
+         BAL   R10,GETMCAT             Get name of mastercat
+         BAL   R10,LDUCATS             Load up the User Cats
+         BAL   R10,ALCUCTAB            Allocate our catalog table
+         BAL   R10,BLDCATAB            Build our catalog table
+         BAL   R10,LOOPCATS            Main loop print dsns from cats
+         B     ENDPRGM                 And we're done
+*
+***********************************************************************
+* End primary program calls
+***********************************************************************
+*
+***********************************************************************
+*  Setup some files and memory
+***********************************************************************
+SETUP    DS    0h
+         OPEN  (CATOUT,OUTPUT)         Open our output dataset
+*
+         L     R3,MAXSIZE              len of our storage to req
+         GETMAIN RC,LV=(R3)            Gets storage
+*                                      And puts the location in R1
+         LTR   R15,R15                 Check return code
+         BNZ   OUT104
+*
+         ST    R1,PARMWRK              Store the location in PARMWRK
+         ST    R3,0(R1)                store the length in the new stg
+         BR    R10                     return
+***********************************************************************
+* Puts the name of the master catalog in our UCAT Var
+***********************************************************************
+GETMCAT  DS    0h
+         L     R5,X'10'                CVT
+         L     R5,X'8C'(R5)            ECVT
+         L     R5,X'188'(R5)           ECVTIPA
+*        At this point the catalog is 235 bytes from ECVTIPA
+         MVC   UCATNAME(44),234(R5)    Master Catalog
+         BR    R10                     Return
+***********************************************************************
+* Loads all the user catalogs into storage
+***********************************************************************
+LDUCATS  DS    0h
+* Setup the parms for IGGCSI00
+         MVI   CSIFIELD,C' '           Clear out the first byte
+         MVC   CSIFIELD+1(CSIFIELL-1),CSIFIELD replace it all w space
+         MVC   CSIFILTK(2),=C'**'      Select All
+*
+         MVC   CSICATNM,UCATNAME       Use the master catalog
+         MVI   CSIDTYPS,C'U'           We only want ucats
+         MVI   CSICLDI,C'Y'            Match clusters
+*
+         MVI   CSIS1CAT,C'Y'           Only search the master catalog
+         MVI   CSIOPTNS,X'00'          halfword addressing
+         MVI   CSINUMEN,X'0'           We dont need extra fields
+* Time to call IGGCSI00
+         LA    R1,PARMLIST             Put the location PLIST in R1
+         CALL  IGGCSI00                Call Catalog Search Interface
+         LTR   R15,R15                 Is there a problem?
+         BZ    LDUCAT0                 no? let's keep going
+* check the RC
+         CLC   CSIMRR(4),FENTERR    If 04/64 then its a simple error*
+         BNZ   OUT102                  yes? we out
+*
+LDUCAT0  BR    R10                     return from LDUCAT
+*
+***********************************************************************
+*  Setup some files and memory
+***********************************************************************
+ALCUCTAB DS    0h
+         L     R5,PARMWRK              Our work area
+         USING CSIRWORK,R5             Address it
+*
+         L     R3,CSIUSDLN             Length of returned data
+         ST    R3,UCATTABL             store for later free
+         GETMAIN RC,LV=(R3)            Get storage for it
+         LTR   R15,R15                 Check RC?
+*
+         BNZ   OUT103
+         ST    R1,UCATTAB              Address of returned storage
+         BR    R10                     Return
+***********************************************************************
+* Builds a table with all cats (mast + all ucats
+***********************************************************************
+BLDCATAB DS    0h
+         L     R9,UCATTAB              Load ucat table add into R9
+         MVC   0(UCATENTL,R9),UCATNAME Put  MSTCAT as the first entry
+         LA    R9,UCATENTL(R9)         Advance R9 to the next location
+*
+         LR    R6,R5                   Also set R6 to working location
+         A     R6,CSIUSDLN             R6 now points to end of data
+*
+         LA    R7,CSIRWORL(R5)         R7 now points to CSIRWENT
+         USING CSIRWENT,R7             And make it addressable
+*
+GETUCAT  DS    0H                      Loop to load UCATs into table
+         MVC   0(UCATENTL,R9),CSIENAME Store it in our table
+         LA    R9,UCATENTL(R9)         Advance the table pointer
+*
+         LA    R7,CSIRWENL(R7)         Go to Next Entry
+         CR    R7,R6                   R6 is total are we less than?
+         BL    GETUCAT                 No we are not
+*
+         MVI   0(R9),X'FF'             Egg marking the end of UCATENTL
+         BR    R10                     Return to main
+***********************************************************************
 * We now have a list of User Catalogs in UCATTAB
 * We're going to loop through each one
 * And get the dataset from each
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
-         LA    R9,UCATTAB         # Reset R9 to point to UCATTAB
-MAINLOOP CLI   0(R9),X'FF'        # Compare the bye, is it FF?
-         BE    ENDPRGM            # Yes, get outta here
-         MVC   UCATNAME,0(R9)     # Current Catalog
-* _.-=-._ Get this Catalog Entries _.-=-._         
-         GETMAIN RC,LV=65535      # Get some space
-         LTR   R15,R15            # Did it work?
-         BNZ   ERRORMAN           # NOOOOOOPE
-         ST    R1,PARMRWK         # Store the location in PARMRWK
-         MVC   0(4,R1),=F'65535'  # And how long it is
-* _.-=-._ Now we setup the parms for IGGCSI00 (again) _.-=-._
-         MVI   CSIFIELD,C' '      # Clear out the first bytes
-         MVC   CSIFIELD+1(CSIFIELL-1),CSIFIELD # replace it all
-         MVC   CSIFILTK(2),=C'**' # Select All
-         MVC   CSICATNM,UCATNAME  # Use the user catalog
-         MVI   CSIDTYPS,C'A'      # We only want non-VSAM
-         MVI   CSICLDI,C'Y'       # Match clusters
-         MVI   CSIS1CAT,C'Y'      # Only search the user catalog
-         MVI   CSIRESRV,X'00'     # LOL IBM WUT
-         MVC   CSINUMEN,=H'1'     # We need one extra field
-         MVC   CSIFLDNM,=CL8'VOLSER  ' # We want the VOLUME now too
+***********************************************************************
+* Get this Catalog Entries
+LOOPCATS DS    0h
+         L     R9,UCATTAB              Reset R9 to point to UCATTAB
+*
+LOOPCAT0 CLI   0(R9),X'FF'             Compare the bye is it FF?
+         BZR   R10                     Yes get outta here
+         MVC   UCATNAME,0(R9)          Current Catalog
+*
+         XC    MSGOUT(MSGOUTL),MSGOUT  clear it out
+         MVC   MSGOUT,=CL59'CAT:'      Show the cat we're working on
+         LA    R1,MSGOUT               load error output (rename this)
+         MVC   4(UCATENTL,R1),UCATNAME load cat name
+*            
+         PUT   CATOUT,MSGOUT           add message
+*
+LOOPCAT1 DS    0h                      clear out usable areas
+         XR    R0,R0                   zero r0
+         XR    R1,R1                   zero r1
+*
+         L     R14,PARMWRK             load up our area to claer
+         L     R15,MAXSIZE             load up size to claer
+         MVCL  R14,R0                  clear it out
+*
+* Now we setup the parms for IGGCSI00 (again)
+*
+LOOPCAT2 DS    0h
+         L     R3,MAXSIZE              set up first param (size)
+         L     R1,PARMWRK              load up work area
+         ST    R3,0(R1)                store the length in the new stg
+*
+         MVI   CSIFIELD,C' '           Clear out the first bytes
+         MVC   CSIFIELD(CSIFIELL),CSIFIELD  replace it all w spaces
+         MVC   CSIFILTK(2),=C'**'      Select All
+*
+         MVC   CSICATNM,UCATNAME       Use the user catalog
+         MVI   CSIDTYPS,C'A'           We only want non-VSAM
+         MVI   CSICLDI,C'Y'            Match clusters
+*
+         MVI   CSIS1CAT,C'Y'           Only search the user catalog
+         MVI   CSIOPTNS,X'00'          halfword address
+         MVC   CSINUMEN,=H'1'          We need one extra field
+*
+         MVC   CSIFLDNM,=CL8'VOLSER  ' We want the VOLUME now too
 CSILOOP  EQU *
-* _.-=-._ Time to call IGGCSI00 _.-=-._         
-         LA    R1,PARMLIST        # Put the location PLIST in R1
-         CALL  IGGCSI00           # Call Catalog Search Interface
-C1       LTR   R15,R15            # Is there a problem?
-C2       BZ    CONT               # Nope
-C3       CLC   CSIMRR(4),FENTERR  # If 04/64 then its a simple error
-C4       BNE   ERRORMAN           # Welp couldnt do that     
-* _.-=-._ Work with the CSI Data _.-=-._         
-CONT     L     R5,PARMRWK         # Load GETMAIN storage address in R5
-         USING CSIRWORK,R5        # Make it addressable
-         TM    CSICFLG,B'0100000' # CSINOENT no entries? Ugh
-         BO    NOENTRY            # Skip this catalog then i guess
-         LR    R6,R5              # Set R6 to work location
-         A     R6,CSIUSDLN        # R6 now points to end of CSI
-         LA    R7,CSIRWORL(R5)    # R7 now points to CSIRWENT
-         USING CSIRWENT,R7        # And make it addressable
-ENTRLOOP DS    0H         
+         LA    R1,PARMLIST             Put the location PLIST in R1
+*
+         CALL  IGGCSI00                Call Catalog Search Interface
+         LTR   R15,R15                 Is there a problem?
+         BZ    LOOPCAT3                NO, let's roll
+*
+         CLC   CSIMRR(4),FENTERR       If 04/64 then its a simple error
+         BZ    LOOPCAT3                we good, move on
+* PUT SOME ERROR MESSAGES OUT
+         XC    MSGOUT(MSGOUTL),MSGOUT  clear it out
+         MVC   MSGOUT,=CL4'ERR:'       Show the cat we're working on
+         LA    R1,MSGOUT               load error output (rename this)
+         MVC   4(UCATENTL,R1),UCATNAME load cat name
+*            
+         PUT   CATOUT,MSGOUT           add message
+         B     NOENTRY                 GO TO NEXT CAT
+* Work with the CSI Data
+LOOPCAT3 DS    0H
+         L     R5,PARMWRK              GETMAIN storage address in R5
+         USING CSIRWORK,R5             Make it addressable
+*
+         XR    R1,R1                   zero r1
+         LB    R1,CSINOENT             load our test flag
+         EX    R1,TESTENT              execute our test
+*
+TESTENT  TM    CSICFLG,0               see if the flag matches
+         BNZ   OUT107
+         LR    R6,R5                   Set R6 to work location
+*
+         A     R6,CSIUSDLN             R6 now points to end of CSI
+         LA    R7,CSIRWORL(R5)         R7 now points to CSIRWENT
+         USING CSIRWENT,R7             And make it addressable
+ENTRLOOP DS    0H
+*
          MVC   UDATASET,CSIENAME
-         LA    R8,CSIRWENL(R7)    # R8 now points to fields
-*         LH    R2,0(R8)           # Load length (CSILENFD) in R2
-* TODO: Add multi volume support         
-         LA    R8,2(R8)           # R8 points to VOLSER
-         MVC   UVOLSER,0(R8)      # Put it in UVOLSER
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
+         LA    R8,CSIRWENL(R7)         R8 now points to fields
+*         LH    R2,0(R8)               Load length (CSILENFD) in R2
+* TODO: Add multi volume support
+         LA    R8,2(R8)                R8 points to VOLSER
+         MVC   UVOLSER,0(R8)           Put it in UVOLSER
+*
 * Now that we have a volume and a dataset
 * its time to check access to it
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
-         B     CHKACCSS
-DONECHK  PUT   SYSOUT,ACCESS
-* _.-=-._ Now Check to see if theres more entries _.-=-._
-NEXTENTR LA    R7,CSIRWENL(R7)    # Point R7 at next entry
-         AH    R7,0(R7)           # Add the fields
-         LA    R7,2(R7)           # Next Entry
-         CR    R7,R6              # Have we surpased CSIUSDLN?
-         BL    ENTRLOOP           # Nope go again
-* _.-=-._ Are there more entries than our work area? _.-=-._         
-         CLI   CSIRESUM,C'Y'      # Compare
-         BE    CSILOOP            # Yes there area
-* _.-=-._ Looks like we're done with this catalog _.-=-._         
-NOENTRY  L     R2,PARMRWK         # Store the address in R2
-         FREEMAIN RC,LV=65535,A=(2) # Free it up
-         LA    R9,UCATTABL(R9)    # Get the next Catalog Entry
-         B     MAINLOOP           # Loop it up
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
-* ERROR WILL ROBINSON
-ERRORMAN PUT   SYSOUT,ERRORMSG
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
+*
+         BAL   R2,CHKACCSS             check our access
+         PUT   CATOUT,ACCESS
+* Now Check to see if theres more entries
+NEXTENTR LA    R7,CSIRWENL(R7)         Point R7 at next entry
+         AH    R7,0(R7)                Add the fields
+         LA    R7,2(R7)                Next Entry
+*
+         CR    R7,R6                   Have we surpased CSIUSDLN?
+         BL    ENTRLOOP                Nope go again
+* Are there more entries than our work area?
+         CLI   CSIRESUM,C'Y'           Compare
+         BE    CSILOOP                 Yes there area
+* Looks like we're done with this catalog
+*
+NOENTRY  DS    0h
+         LA    R9,UCATENTL(R9)         Get the next Catalog Entry
+         B     LOOPCAT0                Loop it up
+*
+***********************************************************************
+* All the errors go here
+***********************************************************************
+*
+OUT100   ABEND X'100'                  Nope
+OUT101   ABEND X'101'
+OUT102   ABEND X'102'
+OUT103   ABEND X'103'
+OUT104   ABEND X'104'
+OUT105   ABEND X'105'
+OUT106   ABEND X'106'
+OUT107   ABEND X'107F'
+*
+***********************************************************************
 * We're done here, get the heck out
-ENDPRGM  DS    0H           # We're done lets exit
-         XR    R15,R15      # zero return code
-         PR    ,            # Return to caller
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
+***********************************************************************
+*
+ENDPRGM  DS    0H                      We're done lets exit
+         DROP  R5,R7                   Won't need these anymore
+*
+         XC    MSGOUT(MSGOUTL),MSGOUT  clear it out
+         MVC   MSGOUT,=CL59'END:  DUMP OF CATALOGS IS COMPLETE'
+*            
+         PUT   CATOUT,MSGOUT           add message         
+*
+         XR    R1,R1                   zero out r1
+         XR    R2,R2                   zero out r2
+*
+         L     R1,PARMWRK              Get add to free
+         L     R2,0(0,R1)              Size of area
+         FREEMAIN RC,LV=(R2),A=(R1)    free it up
+*
+         LTR   R15,R15                 works?
+         BNZ   OUT105                  errr owt
+*
+         XR    R1,R1                   zero out r1
+         XR    R2,R2                   zero out r2
+*
+         L     R1,UCATTAB              Get add to free
+         L     R2,UCATTABL             Size of area
+         FREEMAIN RC,LV=(R2),A=(R1)    free it up
+*
+         LTR   R15,R15                 works?
+         BNZ   OUT106                  errr owt
+*
+         XR    R15,R15                 zero return code
+         PR    ,                       Return to caller
+         LTORG ,                       put our constants here
+*
+***********************************************************************
 * Checks access to a dataset
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
+***********************************************************************
+*
 CHKACCSS DS 0H
 SAFCHK   RACROUTE REQUEST=AUTH,                                        x
                RELEASE=1.9,                                            x
@@ -184,10 +325,10 @@ SAFCHK   RACROUTE REQUEST=AUTH,                                        x
                ATTR=UPDATE,                                            x
                ENTITY=UDATASET,VOLSER=UVOLSER,                         x
                WORKA=SAFWORKA
-         LM    R3,R4,SAFCHK+4     # Save Return Code, Rsn Code in R3/R4
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
+         LM    R3,R4,SAFCHK+4       Save Return Code, Rsn Code in R3/R4
+*
+***********************************************************************
 * SAF Return Codes (when R15 is 0 and R3 is x14)
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
 *
 * R4 is one of the following:
 * x0   = No Access
@@ -196,52 +337,84 @@ SAFCHK   RACROUTE REQUEST=AUTH,                                        x
 * xC   = CONTROL (same as UPDATE on non-vsam datasets thanks EM)
 * x10  = ALTER
 *
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
+***********************************************************************
 *
-CHECKRTN DS    0H           # Check SAF Return Code in R15
-         C     R15,=F'0'    # If its zero check RACF RC
+CHECKRTN DS    0H                      Check SAF Return Code in R15
+         C     R15,=F'0'               If its zero check RACF RC
          BE    CHECKACS
-         C     R15,=F'4'    # Otherwise is the SAF RC 4?
-         BNE   ERROR        # Its not? Then its 8 or 64 and thats bad
-         C     R3,=F'4'     # The specified resource is not protected
-         BNE   NOACCESS     # We get no access (if rc is 8)
-         MVC   ACCESS,NOTPROTA # This dataset is not protected (^-^)
-         B     DONECHK
+         C     R15,=F'4'               Otherwise is the SAF RC 4?
+*
+         BNE   ACCERR                  Then its 8 or 64 and thats bad
+         C     R3,=F'4'                resource is not protected
+         BNE   NOACCESS                We get no access (if rc is 8)
+*
+         MVC   ACCESS,NOTPROTA         dataset is not protected
+         BR    R2                      return
+*
 CHECKACS DS    0H
-         C     R3,=F'20'    # Is the SAF return code 0x14?
-         BNE   ERROR        # No? Then we dont care   
-NOACCESS C     R4,=F'0'     # Do we have no access?
-         BNE   READ         # We dont? try READ
+         C     R3,=F'20'               Is the SAF return code 0x14?
+         BNE   ACCERR                  No? Then we dont care
+*
+NOACCESS C     R4,=F'0'                Do we have no access?
+         BNE   READ                    We dont? try READ
          MVC   ACCESS,NONEA
-         B     DONECHK
-READ     C     R4,=F'4'     # Do we have read?
-         BNE   UPDATE       # No try UPDATE
+         BR    R2                      return
+*
+READ     C     R4,=F'4'                Do we have read?
+         BNE   UPDATE                  No try UPDATE
          MVC   ACCESS,READA
-         B     DONECHK
-UPDATE   C     R4,=F'8'     # Do we have update?
-         BNE   CONTROL      # Nope, try control
+         BR    R2                      return
+*
+UPDATE   C     R4,=F'8'                Do we have update?
+         BNE   CONTROL                 Nope, try control
          MVC   ACCESS,UPDATEA
-         B DONECHK
-CONTROL  C     R4,=F'12'    # Do we have control?
-         BNE   ALTER        # Nope, last chance, try alter
+         BR    R2                      return
+*
+CONTROL  C     R4,=F'12'               Do we have control?
+         BNE   ALTER                   Nope, last chance, try alter
          MVC   ACCESS,CONTROLA
-         B     DONECHK
-ALTER    C     R4,=F'16'    # Do we have alter?
-         BNE   ERROR        # Dang, well then we have a problem
+         BR    R2                      return
+*
+ALTER    C     R4,=F'16'               Do we have alter?
+         BNE   ACCERR                  well then we have a problem
          MVC   ACCESS,ALTERA
-         B DONECHK
-ERROR    MVC   ACCESS,ERRORA 
-         B     DONECHK
-* Work stuff
+         BR    R2                      return
+*
+ACCERR   MVC   ACCESS,ERRORA           output error
+         BR    R2                      return
+***********************************************************************
+* show logo routine
+***********************************************************************
+*
+SHOWLOGO DS    0h
+PUT1     PUT   CATOUT,CAT1
+PUT2     PUT   CATOUT,CAT2
+PUT3     PUT   CATOUT,CAT3
+*
+PUT4     PUT   CATOUT,CAT4
+PUT5     PUT   CATOUT,CAT5
+PUT6     PUT   CATOUT,CAT6
+*
+PUT7     PUT   CATOUT,CAT7
+PUT8     PUT   CATOUT,ACCESS           Newline
+         BR    R10                     Return
+*
+***********************************************************************
+* end of program
+* Working variables and things and stuff
+***********************************************************************
+DBG1     DC    CL8'UCATNAME'
 UCATNAME DS    CL44' '
 ACCESS   DS    CL7
 SPACED   DS    CL1
 UVOLSER  DS    CL6
 SPACED2  DS    CL1
 UDATASET DS    CL44
-* _.-=-._ Dope ass logo _.-=-._ 
+***********************************************************************
+* A logo
+***********************************************************************
 CAT1     DC C'   _______  _______  _______ '
-CAT12    DC C' __   __  _______  _______    ' 
+CAT12    DC C' __   __  _______  _______    '
 CAT2     DC C'  |       ||   _   ||       |'
 CAT22    DC C'|  |_|  ||   _   ||       |   '
 CAT3     DC C'  |       ||  |_|  ||_     _|'
@@ -254,26 +427,51 @@ CAT6     DC C'  |     |_ |   _   |  |   |  '
 CAT62    DC C'| ||_|| ||   _   ||   |       '
 CAT7     DC C'  |_______||__| |__|  |___|  '
 CAT72    DC C'|_|   |_||__| |__||___|       '
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
-ERRORMSG DC CL59'ERROR '
-FENTERR  DC    XL4'C6E20464'
-SYSOUT   DCB   DDNAME=SYSOUT,DSORG=PS,MACRF=PM,                        x
+***********************************************************************
+* Variables, constants, dsects and so much more!
+***********************************************************************
+MSGOUT   DC    CL59'ERROR '            CUSTOM ERROR MSG SPACE
+MSGOUTL  EQU   *-MSGOUT                Length of error msg
+*
+* RACROUTE Work Area
+*
+NONEA    DC    C'NONE   '              No Access :( :(
+READA    DC    C'READ   '              Read Access :(
+UPDATEA  DC    C'UPDATE '              Update Access!
+CONTROLA DC    C'CONTROL'              Control Access
+ALTERA   DC    C'ALTER  '              Alter Access
+WHATA    DC    C'RC N/A '              Weird Return Code?
+NOTPROTA DC    C'NOTPROT'              dataset is not protected by RACF
+ERRORA   DS    C'ERROR  '              ERROR catch all
+SAFWORKA DS    CL512
+***********************************************************************
+*   DD output for JCL listing
+***********************************************************************
+CATOUT   DCB   DDNAME=CATOUT,DSORG=PS,MACRF=PM,                        x
                RECFM=FB,LRECL=59
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
+*
+***********************************************************************
 * User Catalog Storage Table
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
-UCATTAB  DS    100CL44    # 100 User catalogs, hope its enough
-UCATTABL EQU   44
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
+***********************************************************************
+*
+UCATTAB  DS    A                       Catalog table (mast+user)
+UCATTABL DC    F'0'                    len of ucat tab
+UCATENTL EQU   44                      Len of 1 entry without flags
+*
 * R1 Plist for IGGCSI00
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
-PARMLIST DS    0D              # Parmlist for Dataset listing
-PARMMRR  DC    A(CSIMRR)       # 4 bytes module, reason, and rtn code
-PARMSCF  DC    A(CSIFIELD)     # IGGCSI00 parameters
-PARMRWK  DC    A(0)            # Work area, we fill this with GETMAIN
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
+*
+PARMLIST DS    0D                      Parmlist for Dataset listing
+PARMMRR  DC    A(CSIMRR)               module, reason, and rtn code
+PARMSCF  DC    A(CSIFIELD)             IGGCSI00 parameters
+PARMWRK  DS    A                       Work area
+***********************************************************************
 * Parameters for IGGCSI00
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
+***********************************************************************
+*
+MAXSIZE  DC    F'65535'                size for get mains
+MSL      EQU   MAXSIZE
+*
+FENTERR  DC    XL4'C6E20464'           basic 04 + 100 rsn
 *
 * CSIDTYPD/CSIETYPE Info:
 * A Non-VSAM data set
@@ -289,73 +487,120 @@ PARMRWK  DC    A(0)            # Work area, we fill this with GETMAIN
 * W ATL Volume entry
 * X Alias
 *
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
+* CR 08/2024 updated CSIOPTNS for new model, F for Fullword and
+*              H for halfwords (default)
+*
 CSIFIELD DS    0F
-CSIFILTK DC    CL44'**'    # Generic filter key
-CSICATNM DC    CL44' '     # Catalog name or blanks
-CSIRESNM DC    CL44' '     # RESUME
-CSIDTYPD DS    0CL16       # ENTRY TYPES
-CSIDTYPS DC    CL16'A               '  # Entry types to be returned
-CSIOPTS  DS    0CL4        # CSI OPTIONS
-CSICLDI  DC    CL1' '      # Cluster matching (no)
-CSIRESUM DC    CL1' '      # RESUME FLAG
-CSIS1CAT DC    CL1' '      # SEARCH ONLY 1 CATALOG (no)
-CSIRESRV DC    XL1'00'     # RESERVED
-CSINUMEN DC    H'1'      # NUMBER OF ENTRIES FOLLOWING
-CSIENTS  DS    0CL8        # VARIABLE NUMBER OF ENTRIES FOLLOW
-CSIFLDNM DC    CL8'VOLSER  ' # FIELD NAME
+CSIFILTK DC    CL44'**'                Generic filter key
+CSICATNM DC    CL44' '                 Catalog name or blanks
+CSIRESNM DC    CL44' '                 RESUME
+CSIDTYPD DS    0CL16                   ENTRY TYPES
+CSIDTYPS DC    CL16'A               '  Entry types to be returned
+CSIOPTS  DS    0CL4                    CSI OPTIONS
+CSICLDI  DC    CL1' '                  Cluster matching
+CSIRESUM DC    CL1' '                  RESUME FLAG, must be blank first
+CSIS1CAT DC    CL1' '                  SEARCH ONLY 1 CATALOG
+CSIOPTNS DC    XL1'00'                 F means to use fullword lengths
+*                                      any other entry means halfword
+CSINUMEN DC    H'1'                    NUMBER OF ENTRIES FOLLOWING
+CSIENTS  DS    0CL8                    VARIABLE # OF ENTRIES FOLLO
+CSIFLDNM DC    CL8'VOLSER  '           FIELD NAME
 CSIFIELL EQU   *-CSIFIELD
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
+*
 * From CSI: Module ID, Reason and Return code
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
+*
 CSIMRR   DS    0F
-CSIMODID DC    XL2'0000'    # Module ID
-CSIRSNC  DC    XL1'00'      # Reason Code
-CSIRTNC  DC    XL1'00'      # Return Code
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
-* RACROUTE Work Area
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
-NONEA    DC    C'NONE   ' # No Access :( :(
-READA    DC    C'READ   ' # Read Access :(
-UPDATEA  DC    C'UPDATE ' # Update Access!
-CONTROLA DC    C'CONTROL' # Control Access
-ALTERA   DC    C'ALTER  ' # Alter Access
-WHATA    DC    C'RC N/A ' # Weird Return Code?
-NOTPROTA DC    C'NOTPROT' # The dataset is not protected by RACF
-ERRORA   DS    C'ERROR  ' # ERROR catch all
-SAFWORKA DS    CL512
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
+CSIMODID DC    XL2'0000'               Module ID
+CSIRSNC  DC    XL1'00'                 Reason Code
+CSIRTNC  DC    XL1'00'                 Return Code
+*
+*
+***********************************************************************
 * CSI Work Area
-* _.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._.-=-._
+***********************************************************************
+*
+*************** constants for CSI ***************
+*
+***********************************************************************
+* CSICFLG bits for each Catalog returns
+***********************************************************************
+CSINTICF DC    B'10000000'             Not supported.
+CSINOENT DC    B'01000000'             No entry found for this cat
+CSINTCMP DC    B'00100000'             Data gotton for this catalog
+*                                      is not complete.
+CSICERR  DC    B'00010000'             Whole catalog not processed
+*                                      due to error.
+CSICERRP DC    B'00001000'             Catalog partially processed
+*
+***********************************************************************
+*  CSIEFLAG bits for each entry
+***********************************************************************
+CSIPMENT DC    B'10000000'             Primary entry.
+*        a 0 in the left bit above means entry is associated
+*        with the previous primary entry
+CSIENTER DC    B'01000000'             Error indication is set for this
+*                           entry and error code follows CSIENAME
+CSIEDATF DC    B'00100000'             Data is returned for this entry
+***********************************************************************
+*
+******   CSI DSECT STARTS HERE *****
+* 
+***********************************************************************
 CSIRWORK DSECT
+*
+***********************************************************************
 * Information returned for work area
-CSIUSRLN DS    F # TOTAL LENGTH OF WORKAREA
-CSIREQLN DS    F # MIN REQUIRED WORK AREA LENGTH
-CSIUSDLN DS    F # TOTAL USED WORK AREA LENGTH
-CSINUMFD DS    H # Number of field names
+***********************************************************************
+CSIUSRLN DS    F                       TOTAL LENGTH OF WORKAREA
+CSIREQLN DS    F                       MIN REQUIRED WORK AREA LENGTH
+CSIUSDLN DS    F                       TOTAL USED WORK AREA LENGTH
+CSINUMFD DS    H                       Number of field names + 1
+***********************************************************************
 * Information returned for each catalog
-CSICFLG  DS    CL1  # Catalog flag information
-CSICTYPE DS    CL1  # Catalog type. X'F0'
-CSICNAME DC    CL44' ' # Catalog Name
-CSICRETN DS    0XL4 # Return information for Catalog
-CSICRETM DS    XL2  # Catalog return module ID
-CSICRETR DS    XL1  # Catalog return reason code
-CSICRETC DS    XL1  # Catalog return code
-CSIRWORL EQU   *-CSIRWORK
+***********************************************************************
+CSICFLG  DS    CL1                     Catalog flag information
+CSICTYPE DS    CL1                     Catalog type. X'F0'
+CSICNAME DS    CL44                    Catalog Name
+CSICRETN DS    0XL4                    Return information for Catalog
+CSICRETM DS    XL2                     Catalog return module ID
+CSICRETR DS    XL1                     Catalog return reason code
+CSICRETC DS    XL1                     Catalog return code
+CSIRWORL EQU   *-CSIRWORK              Length of structure
+***********************************************************************
 * Information returned for each entry
+***********************************************************************
 CSIRWENT DSECT
-CSIEFLAG DS    XL1  # Entry flag information
-CSIETYPE DS    XL1  # Entry Type
-CSIENAME DC    CL44' '
-CSIRETN  DS    0XL4 # Return information for Catalog
-CSIERETM DS    XL2  # Entry return module ID
-CSIERETR DS    XL1  # Entry return reason code
-CSIERETC DS    XL1  # Entry return code
-CSIRWENL EQU   *-CSIRWENT
-* Fields
-CSIEDATA DS    0CL3
-CSILENFD DS    CL2
-CSILENF1 DS    CL1
-* END
-         DROP  R11,R12    # Drop Addressability
-         END   MAIN  # Peace owt
+CSIEFLAG DS    XL1                     Entry flag information
+CSIETYPE DS    XL1                     Entry Type
+CSIENAME DS    CL44                    Entry Name
+CSIRETN  DS    0XL4                    Return information for Catalog
+CSIERETM DS    XL2                     Entry return module ID
+CSIERETR DS    XL1                     Entry return reason code
+CSIERETC DS    XL1                     Entry return code
+CSIEDATA DS    0CL4                    Returned data entry - this
+*                                      only exists if CSIENTER is 0
+CSIRWENL EQU   *-CSIRWENT              Length of structure W/O fields
+***********************************************************************
+*  csiedata contents which assume CSIOPTNS IS NOT F
+***********************************************************************
+CSITOTLN DS    CL2                     Total length of fields
+CSI_RSV1 DS    CL2                     Reserved
+CSILENFD DS    0CL2                    Length of fields
+CSILENF1 DS    CL2                     Length of first field etc..
+***********************************************************************
+* csi edata contents IF CSIOPTNS IS F
+***********************************************************************
+CS4TOTLN DS    CL4                     Total length of fields
+CS4_RSV1 DS    CL4                     Reserved
+CS4LENFD DS    0CL4                    Length of fields
+CS4LENF1 DS    CL4                     Length of first field etc..
+***********************************************************************
+* FOR ALL RETURNED DATA - FIELDS BELOW
+***********************************************************************
+CSIFDDAT DS    CL44                    Fields returned - stg must
+*                                      be allocated here
+*
+         YREGS ,                       Register readability macro
+*
+         DROP  R11,R12                 Drop Addressability
+         END   MAIN                    Peace owt
