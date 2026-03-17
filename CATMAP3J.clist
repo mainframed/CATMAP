@@ -1,10 +1,18 @@
-PROC 1 HLQ
+PROC 0 HLQ()
 /******************************************************/
 /* CATMAP3J - Run CATMAP3J for a given HLQ            */
 /* Usage: EX 'YOUR.CLIST(CATMAP3J)' 'HLQ(USERNAME)'   */
 /******************************************************/
 CONTROL NOFLUSH
 
+IF &LENGTH(&HLQ) = 0 THEN DO
+  IF &LENGTH(&SYSPREF) GT 0 THEN +
+    SET &HLQ = &SYSPREF
+  ELSE +
+    SET &HLQ = &SYSUID
+END
+
+WRITE *** USING HLQ: &HLQ
 ALLOC DATASET('&HLQ..CATMAP.OUTPUT') NEW CATALOG +
       DSORG(PS) +
       RECFM(F B) LRECL(59) BLKSIZE(0) +
@@ -23,7 +31,7 @@ IF &LASTCC NE 0 THEN DO
   WRITE ERROR: FAILED TO ALLOCATE DD(CATOUT) RC=&LASTCC
   EXIT CODE(&LASTCC)
 END
-
+WRITE *** EXECUTING CATMAP3J
 CALL '&HLQ..NETSPI.LINKLIB(CATMAP3J)'
 
 IF &LASTCC NE 0 THEN DO
