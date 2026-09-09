@@ -166,8 +166,9 @@ LOOPCAT0 CLI   0(R9),X'FF'             Compare the bye is it FF?
          BZR   R10                     Yes get outta here
          MVC   UCATNAME,0(R9)          Current Catalog
 *
-         XC    MSGOUT(MSGOUTL),MSGOUT  clear it out
-         MVC   MSGOUT,=CL59'CAT:'      Show the cat we're working on
+         MVI   MSGOUT,C' '             clear to EBCDIC blanks
+         MVC   MSGOUT+1(MSGOUTL-1),MSGOUT
+         MVC   MSGOUT,=CL80'CAT:'      Show the cat we're working on
          LA    R1,MSGOUT               load error output (rename this)
          MVC   4(UCATENTL,R1),UCATNAME load cat name
 *            
@@ -211,7 +212,8 @@ CSILOOP  EQU *
          CLC   CSIMRR(4),FENTERR       If 04/64 then its a simple error
          BZ    LOOPCAT3                we good, move on
 * PUT SOME ERROR MESSAGES OUT
-         XC    MSGOUT(MSGOUTL),MSGOUT  clear it out
+         MVI   MSGOUT,C' '             clear to EBCDIC blanks
+         MVC   MSGOUT+1(MSGOUTL-1),MSGOUT
          MVC   MSGOUT,=CL4'ERR:'       Show the cat we're working on
          LA    R1,MSGOUT               load error output (rename this)
          MVC   4(UCATENTL,R1),UCATNAME load cat name
@@ -236,6 +238,10 @@ TESTENT  TM    CSICFLG,0               see if the flag matches
          USING CSIRWENT,R7             And make it addressable
 ENTRLOOP DS    0H
 *
+         TM    CSIEFLAG,B'01000000'     CSI entry error?
+         BO    NEXTENTR                 no usable name/fields
+         TM    CSIEFLAG,B'00100000'     field data returned?
+         BNO   NEXTENTR                 VOLSER is unavailable
          MVC   UDATASET,CSIENAME
          LA    R8,CSIRWENL(R7)         R8 now points to fields
 *         LH    R2,0(R8)               Load length (CSILENFD) in R2
@@ -275,7 +281,7 @@ OUT103   ABEND X'103'
 OUT104   ABEND X'104'
 OUT105   ABEND X'105'
 OUT106   ABEND X'106'
-OUT107   ABEND X'107F'
+OUT107   ABEND X'107'
 *
 ***********************************************************************
 * We're done here, get the heck out
@@ -284,8 +290,9 @@ OUT107   ABEND X'107F'
 ENDPRGM  DS    0H                      We're done lets exit
          DROP  R5,R7                   Won't need these anymore
 *
-         XC    MSGOUT(MSGOUTL),MSGOUT  clear it out
-         MVC   MSGOUT,=CL59'END:  DUMP OF CATALOGS IS COMPLETE'
+         MVI   MSGOUT,C' '             clear to EBCDIC blanks
+         MVC   MSGOUT+1(MSGOUTL-1),MSGOUT
+         MVC   MSGOUT,=CL80'END:  DUMP OF CATALOGS IS COMPLETE'
 *            
          PUT   CATOUT,MSGOUT           add message         
 *
@@ -396,7 +403,9 @@ PUT5     PUT   CATOUT,CAT5
 PUT6     PUT   CATOUT,CAT6
 *
 PUT7     PUT   CATOUT,CAT7
-PUT8     PUT   CATOUT,ACCESS           Newline
+         MVI   MSGOUT,C' '             blank output record
+         MVC   MSGOUT+1(MSGOUTL-1),MSGOUT
+         PUT   CATOUT,MSGOUT           blank line
          BR    R10                     Return
 *
 ***********************************************************************
@@ -405,32 +414,42 @@ PUT8     PUT   CATOUT,ACCESS           Newline
 ***********************************************************************
 DBG1     DC    CL8'UCATNAME'
 UCATNAME DS    CL44' '
+OUTRECL  EQU   80                      FB 80 SEQ/PDS
+OUTREC   DS    0CL80
 ACCESS   DS    CL7
-SPACED   DS    CL1
+SPACED   DC    C' '
 UVOLSER  DS    CL6
-SPACED2  DS    CL1
+SPACED2  DC    C' '
 UDATASET DS    CL44
+         DC    CL21' '                 pad access line to 80
 ***********************************************************************
 * A logo
 ***********************************************************************
 CAT1     DC C'   _______  _______  _______ '
 CAT12    DC C' __   __  _______  _______    '
+         DC    CL21' '
 CAT2     DC C'  |       ||   _   ||       |'
 CAT22    DC C'|  |_|  ||   _   ||       |   '
+         DC    CL21' '
 CAT3     DC C'  |       ||  |_|  ||_     _|'
 CAT32    DC C'|       ||  |_|  ||    _  |   '
+         DC    CL21' '
 CAT4     DC C'  |       ||       |  |   |  '
 CAT42    DC C'|       ||       ||   |_| |   '
+         DC    CL21' '
 CAT5     DC C'  |      _||       |  |   |  '
 CAT52    DC C'|       ||       ||    ___|   '
+         DC    CL21' '
 CAT6     DC C'  |     |_ |   _   |  |   |  '
 CAT62    DC C'| ||_|| ||   _   ||   |       '
+         DC    CL21' '
 CAT7     DC C'  |_______||__| |__|  |___|  '
 CAT72    DC C'|_|   |_||__| |__||___|       '
+         DC    CL21' '
 ***********************************************************************
 * Variables, constants, dsects and so much more!
 ***********************************************************************
-MSGOUT   DC    CL59'ERROR '            CUSTOM ERROR MSG SPACE
+MSGOUT   DC    CL80'ERROR '            CUSTOM ERROR MSG SPACE
 MSGOUTL  EQU   *-MSGOUT                Length of error msg
 *
 * RACROUTE Work Area
@@ -448,7 +467,7 @@ SAFWORKA DS    CL512
 *   DD output for JCL listing
 ***********************************************************************
 CATOUT   DCB   DDNAME=CATOUT,DSORG=PS,MACRF=PM,                        x
-               RECFM=FB,LRECL=59
+               RECFM=FB,LRECL=80
 *
 ***********************************************************************
 * User Catalog Storage Table

@@ -1,106 +1,242 @@
 # CATMAP
 
-**CATMAP** is a series of tools to be used on z/OS to map out the various datasets on the system. 
+CATMAP is a collection of z/OS tools that walks the master catalog and
+connected user catalogs to map the system's non-VSAM data sets.
 
-## *catmap.rexx* 
+## Implementations
 
-the original tool! A rexx script to map out the datasets on the system. 
+- `catmap.rexx` — the original TSO REXX implementation.
+- `CATMAP3.hlasm` — HLASM implementation that writes to the TSO terminal.
+- `CATMAP3J.hlasm` — batch HLASM implementation that writes to `CATOUT`.
+- `CATMAP3N.hlasm` — networked HLASM implementation that sends ASCII over TCP.
 
-**Usage:**
+The three CATMAP3 variants share the same catalog and access-checking logic:
 
+1. Obtain the master catalog from z/OS control blocks.
+2. Use the Catalog Search Interface (`IGGCSI00`) to discover user catalogs.
+3. Search each catalog for non-VSAM data sets and their volume serials.
+4. Use `RACROUTE REQUEST=AUTH,STATUS=ACCESS` to report the caller's access.
+
+The catalog table is allocated dynamically, the CSI work area is reused, and
+individual catalog errors do not stop the complete scan. CSI entries marked as
+errors or without returned field data are skipped.
+
+## Output format
+
+CATMAP3 output records are 80 bytes:
+
+```text
+ACCESS  VOLSER DATA.SET.NAME
 ```
+
+The fields are seven bytes of access, one blank, six bytes of VOLSER, one
+blank, 44 bytes of data set name, and 21 trailing blanks. Possible access
+values include `NONE`, `READ`, `UPDATE`, `CONTROL`, `ALTER`, `NOTPROT`, and
+`ERROR`.
+
+CATMAP3J uses `RECFM=FB,LRECL=80`, allowing `CATOUT` to reference a standard
+FB 80 sequential data set or a member of an FB 80 PDS:
+
+```jcl
+//CATOUT DD DSN=YOUR.CATMAP.OUTPUT,DISP=OLD
+```
+
+```jcl
+//CATOUT DD DSN=YOUR.FB80.PDS(CATMAP),DISP=SHR
+```
+
+CATMAP3N sends each 80-byte record followed by an ASCII line feed.
+
+## catmap.rexx
+
+The original REXX implementation uses TSO commands such as `LISTCAT`,
+`LISTDSI`, and `LISTDS`.
+
+```text
 Arguments:
-  -h this help
-  -p display product info based on HLQ
-  -b brutal mode (gets PDS/PDSE member listings)
-  -verbose enables verbose mode
-  -f <dataset name> saves output to a file
-      (-vol <volume>) Volume for dataset - optional
-      (-space <# cylinders>) size of dataset in cylinders
-                             100 cyls = 59 MB - optional
+  -h                 display help
+  -p                 display product information based on HLQ
+  -b                 list PDS/PDSE members ("brutal" mode)
+  -verbose           enable verbose output
+  -f <data set>      save output to a new data set
+  -vol <volume>      output volume (optional)
+  -space <cylinders> output allocation size (optional)
 ```
 
-## *CATMAP3.hlasm*
+Brutal mode can generate large numbers of access violations. Use it with
+care.
 
-The new and improved CATMAP. Whats new?
+## CATMAP3 (TSO)
 
-- Written in HLASM so its FAST
-- Uses `IGGCSI00` (you'll need access to that to use this tool, usually located in `SYS1.LINKLIB`)
-- Lists every non-vsam file 
-- ***NEW*** Uses `RACROUTE` to check your access to every DATASET/PDS
+CATMAP3 requires a TSO environment because it uses `TPUT`:
 
-This tool *requires* TSO to use, since it uses `TPUT` to output to the screen. For a batch (i.e. JCL) version see CATMAP3J.
-
-Added is using `RACROUTE` to check your access. This couldn't be done in the REXX version without using RACF/ACF2/TopSecret commands. This tool is ESM agnostic and will work in all three environments.
-
-To compile this you can use the following JCL (make sure you change up the JOBCARD though (thats the first three lines). Just put the source in some PDS and call it CATMAP3. This compiles it with symbols, etc for debugging. 
-
-```jcl
-//COMPILEG JOB (ASSY),'CATMAP3',CLASS=A,MSGCLASS=Y,
-//         NOTIFY=&SYSUID,MSGLEVEL=(1,1)
-//         SET FILE=CATMAP3
-//ASM      EXEC PROC=HLASMCL,PARM.L=(TEST),PARM.C=(TEST)
-//SYSIN    DD   DSN=<some pds>(&FILE),DISP=(SHR)
-//L.SYSLMOD DD DSN=<some pds.bin>(&FILE),DISP=(SHR)
-//L.SYSLIN DD
-//         DD DSN=SYS1.LINKLIB(IGGCSI00),DISP=SHR
-//L.SYSPRINT  DD SYSOUT=*
-//
+```text
+CALL 'YOUR.LOADLIB(CATMAP3)'
 ```
 
-If the JCL fails, you can use the foreground compiler to compile it and link it for you. Use ISPF option 4 to see forground tools. 
+Use `compile_catmap3.jcl` to assemble and link it. Update its job card and data
+set names for your environment. The link-edit must include `IGGCSI00`, normally
+from `SYS1.LINKLIB`.
 
-Once compiled you can run it with `CALL <some pds.bin>(CATMAP3)` assuming `some pds.bin` is your load library. E.G. `CALL SOF.LOAD(CATMAP3)`.
-
-## *CATMAP3J.hlasm*
-
-This version is EXACTLY the same as **CATMAP3** except it uses batch to output the results to files instead of printing it to the screen. Compiling it is the same as above. To execute it you can use the following JCL but make sure you change the job card:
+The following is a complete assemble-and-link example:
 
 ```jcl
-//CATMAP3J JOB (ASSY),'CATMAPJCL',CLASS=A,MSGCLASS=Y,
+//CATMAP3C JOB (ACCT),'COMPILE CATMAP3',CLASS=A,MSGCLASS=Y,
 //         NOTIFY=&SYSUID,MSGLEVEL=(1,1)
-//CATMAP   EXEC PGM=CATMAP3J
-//STEPLIB  DD DSN=<where CATMAP3J binary lives>,DISP=SHR
-//SYSUDUMP DD SYSOUT=*
-//SYSOUT   DD SYSOUT=*
-```
-
-## *CATMAP3N.hlasm*
-
-This version adds networking capabilities to CATMAP3. Why? Because frequently the amount of data generates is in the hundreds of megs. And the job can take a while to run. Passing it over the network make it faster to get the information you need. 
-
-Compiling this program is different from the previous two, you need to specify the library where it can find some of the programs we use, specify `IGGCSI00` and `EZACIC04` are used and typical reside (but not always) in `SYS1.LINKLIB` and `TCPIP.SEZACMAC`.
-
-```jcl
-//COMPILEL JOB (SOF),'Compile and Link',CLASS=A,MSGCLASS=Y,
-//         NOTIFY=&SYSUID,MSGLEVEL=(1,1)
-//         SET FILE=CATMAP3N
-//ASSEMBLY EXEC PGM=ASMA90,PARM=OBJECT
-//SYSPRINT DD  SYSOUT=A
-//SYSTERM  DD  SYSOUT=A
-//SYSIN    DD  DSN=<some folder/pds>(&FILE),DISP=SHR
+//ASSEMBLY EXEC PGM=ASMA90,PARM='OBJECT,NODECK'
+//SYSPRINT DD  SYSOUT=*
+//SYSTERM  DD  SYSOUT=*
+//SYSIN    DD  DSN=YOUR.SOURCE(CATMAP3),DISP=SHR
 //SYSLIB   DD  DSN=SYS1.MACLIB,DISP=SHR
-//         DD  DSN=TCPIP.SEZACMAC,DISP=SHR
-//SYSUT1   DD  DSN=&&SYSUT1,SPACE=(16384,(120,120),,,ROUND),
-//             UNIT=SYSALLDA,BUFNO=1
-//SYSLIN   DD  DSN=&&OBJ,SPACE=(3040,(40,40),,,ROUND),
-//             UNIT=SYSALLDA,DISP=(MOD,PASS),
-//             BLKSIZE=3040,LRECL=80,RECFM=FB,BUFNO=1
-//LINK     EXEC PGM=HEWL,PARM='MAP,LET,LIST',COND=(8,LT,ASSEMBLY)
-//*
+//SYSUT1   DD  UNIT=SYSALLDA,SPACE=(CYL,(1,1))
+//SYSLIN   DD  DSN=&&OBJ,DISP=(NEW,PASS),
+//             UNIT=SYSALLDA,SPACE=(CYL,(1,1)),
+//             DCB=(RECFM=FB,LRECL=80,BLKSIZE=3200)
+//LINK     EXEC PGM=HEWL,PARM='MAP,LET,LIST',
+//             COND=(8,LT,ASSEMBLY)
 //SYSLIN   DD  DSN=&&OBJ,DISP=(OLD,DELETE)
 //         DD  DDNAME=SYSIN
-//SYSLMOD  DD DSN=<some folder/pds>(&FILE),DISP=SHR
-//SYSUT1   DD  DSN=&&SYSUT1,SPACE=(1024,(120,120),,,ROUND),
-//             UNIT=SYSALLDA,BUFNO=1
+//SYSLMOD  DD  DSN=YOUR.LOAD(CATMAP3),DISP=SHR
+//SYSUT1   DD  UNIT=SYSALLDA,SPACE=(CYL,(1,1))
+//SYSLIB   DD  DSN=SYS1.LINKLIB,DISP=SHR
+//SYSPRINT DD  SYSOUT=*
+//SYSIN    DD  *
+ INCLUDE SYSLIB(IGGCSI00)
+ NAME CATMAP3(R)
+/*
+```
+
+It can also be called from a batch TSO step:
+
+```jcl
+//CATMAP3R JOB (ACCT),'RUN CATMAP3',CLASS=A,MSGCLASS=Y,
+//         NOTIFY=&SYSUID
+//TSO      EXEC PGM=IKJEFT01,DYNAMNBR=20
+//STEPLIB  DD  DSN=YOUR.LOAD,DISP=SHR
+//SYSTSPRT DD  SYSOUT=*
+//SYSTSIN  DD  *
+ CALL 'YOUR.LOAD(CATMAP3)'
+/*
+```
+
+## CATMAP3J (batch)
+
+CATMAP3J writes its results through the `CATOUT` DD. Use
+`compile_catmap3j.jcl` to build it and `run_catmap3j.jcl` as an execution
+example. To build it manually, use the CATMAP3 compile example above and
+replace every `CATMAP3` member or module name with `CATMAP3J`.
+
+```jcl
+//CATMAPJR JOB (ACCT),'RUN CATMAP3J',CLASS=A,MSGCLASS=Y,
+//         NOTIFY=&SYSUID
+//CATMAP   EXEC PGM=CATMAP3J
+//STEPLIB  DD  DSN=YOUR.LOAD,DISP=SHR
+//SYSUDUMP DD  SYSOUT=*
+//CATOUT   DD  DSN=YOUR.CATMAP.OUTPUT,
+//             DISP=(NEW,CATLG,DELETE),
+//             UNIT=SYSALLDA,SPACE=(CYL,(2,2),RLSE),
+//             DCB=(RECFM=FB,LRECL=80,BLKSIZE=0)
+```
+
+To write to an existing FB 80 PDS member instead:
+
+```jcl
+//CATOUT   DD  DSN=YOUR.FB80.PDS(CATMAP),DISP=SHR
+```
+
+`CATMAP3J.clist` provides a TSO helper that allocates an FB 80 sequential
+output data set before calling the load module. Its `CHANGEME` storage class,
+management class, volume, and load-library values must be adapted first.
+
+## CATMAP3N (TCP)
+
+CATMAP3N accepts two required parameters:
+
+1. An IPv4 address in dotted-decimal form (`###.###.###.###`).
+2. An integer port from 1 through 65535.
+
+Host names and IPv6 addresses are not accepted.
+
+Start a listener on a host reachable from z/OS:
+
+```sh
+ncat -nlvp 4444
+```
+
+Then call CATMAP3N from TSO:
+
+```text
+CALL 'YOUR.LOADLIB(CATMAP3N)' '192.0.2.10 4444'
+```
+
+Invalid parameters return code 8. Network initialization or connection errors
+return code 12.
+
+Use `compile_catmapn.jcl` to build CATMAP3N. In addition to the normal HLASM
+macros and `IGGCSI00`, it requires the z/OS Communications Server socket
+macros and conversion routine, commonly found in:
+
+- `TCPIP.SEZACMAC`
+- `TCPIP.SEZATCP`
+
+The complete network build differs by adding the TCP/IP macro and link
+libraries:
+
+```jcl
+//CATMAPNC JOB (ACCT),'COMPILE CATMAP3N',CLASS=A,MSGCLASS=Y,
+//         NOTIFY=&SYSUID,MSGLEVEL=(1,1)
+//ASSEMBLY EXEC PGM=ASMA90,PARM='OBJECT,NODECK'
+//SYSPRINT DD  SYSOUT=*
+//SYSTERM  DD  SYSOUT=*
+//SYSIN    DD  DSN=YOUR.SOURCE(CATMAP3N),DISP=SHR
+//SYSLIB   DD  DSN=SYS1.MACLIB,DISP=SHR
+//         DD  DSN=TCPIP.SEZACMAC,DISP=SHR
+//SYSUT1   DD  UNIT=SYSALLDA,SPACE=(CYL,(1,1))
+//SYSLIN   DD  DSN=&&OBJ,DISP=(NEW,PASS),
+//             UNIT=SYSALLDA,SPACE=(CYL,(1,1)),
+//             DCB=(RECFM=FB,LRECL=80,BLKSIZE=3200)
+//LINK     EXEC PGM=HEWL,PARM='MAP,LET,LIST',
+//             COND=(8,LT,ASSEMBLY)
+//SYSLIN   DD  DSN=&&OBJ,DISP=(OLD,DELETE)
+//         DD  DDNAME=SYSIN
+//SYSLMOD  DD  DSN=YOUR.LOAD(CATMAP3N),DISP=SHR
+//SYSUT1   DD  UNIT=SYSALLDA,SPACE=(CYL,(1,1))
 //SYSLIB   DD  DSN=SYS1.LINKLIB,DISP=SHR
 //         DD  DSN=TCPIP.SEZATCP,DISP=SHR
 //SYSPRINT DD  SYSOUT=*
-//*
+//SYSIN    DD  *
+ INCLUDE SYSLIB(IGGCSI00)
+ NAME CATMAP3N(R)
+/*
 ```
 
-To use this version you'll need to change line 360 to add your IP address. Follow the comments how to do that. Then open up a listener on port 4444 on your machine and run the program either in `IKJEFT01` or TSO with `CALL <some folder>(CATMAP3N)`. 
+`run_catmap3n.jcl` contains a batch TSO example. The equivalent JCL is:
 
-### CATMAP2
+```jcl
+//CATMAPNR JOB (ACCT),'RUN CATMAP3N',CLASS=A,MSGCLASS=Y,
+//         NOTIFY=&SYSUID
+//TSO      EXEC PGM=IKJEFT01,DYNAMNBR=20
+//STEPLIB  DD  DSN=YOUR.LOAD,DISP=SHR
+//SYSTSPRT DD  SYSOUT=*
+//SYSTSIN  DD  *
+ CALL 'YOUR.LOAD(CATMAP3N)' '192.0.2.10 4444'
+/*
+```
 
-What happened to CATMAP2? It's garbage and basically didn't work, so we skipped over it. 
+## ACF2 note
+
+The SAF interface is portable, but `STATUS=ACCESS` has an ACF2-specific
+authorization requirement. ACF2 treats this request as an unaudited
+interrogation of security definitions and can issue system abend S047 when a
+non-APF-authorized program makes the call.
+
+No S047 recovery handler is currently implemented in CATMAP. On ACF2 systems,
+the security administrator can define a narrowly scoped GSO SAFDEF with
+`NOAPFCHK` for the CATMAP program and its
+`REQUEST=AUTH,CLASS=DATASET,STATUS=ACCESS` call. The other option is to run an
+appropriately reviewed build from an APF-authorized environment. Consult the
+site security administrator before either change.
+
+## CATMAP2
+
+CATMAP2 was an unsuccessful intermediate implementation and is not included.
