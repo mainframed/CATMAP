@@ -144,9 +144,10 @@ To write to an existing FB 80 PDS member instead:
 //CATOUT   DD  DSN=YOUR.FB80.PDS(CATMAP),DISP=SHR
 ```
 
-`CATMAP3J.clist` provides a TSO helper that allocates an FB 80 sequential
-output data set before calling the load module. Its `CHANGEME` storage class,
-management class, volume, and load-library values must be adapted first.
+`CATMAP3J.clist` allocates an FB 80 sequential output data set, then calls
+`&SYSUID..CATMAP.LOADLIB(CATMAP3J)`. Output defaults to
+`userid.CATMAP.OUTPUT`; use `HLQ(prefix)` to select another output prefix.
+The output data set must not already exist.
 
 ## CATMAP3N (TCP)
 
@@ -240,3 +241,63 @@ site security administrator before either change.
 ## CATMAP2
 
 CATMAP2 was an unsuccessful intermediate implementation and is not included.
+
+## Binary release installation
+
+`CATMAP.XMI` is a binary TSO TRANSMIT file containing `CATMAP.XMILIB`:
+
+- `LOADLIB`: nested XMIT of the three assembled load modules (`CATMAP3`,
+  `CATMAP3J`, `CATMAP3N`).
+- `JCLLIB`: nested XMIT containing `RUN3`, `RUN3J`, `RUN3N`, `RUNREXX`,
+  the `CATMAP3J` CLIST, and the original `CATMAP` REXX exec.
+- `SOURCE`: nested XMIT of the three HLASM sources and their compile JCL
+  (`COMPILE3`, `COMPILEJ`, `COMPILEN`).
+- `INSTALL`: CLIST that receives all three libraries under the executing user's
+  `&SYSUID`.
+
+Upload `CATMAP.XMI` **in binary mode** to a sequential FB 80 data set. For
+example, with Zowe configured for your system (replace `YOURID`):
+
+```sh
+zowe zos-files create ps YOURID.CATMAP.XMI --rf FB --rl 80 --bs 27920 --ps 5 --ss 2
+zowe zos-files upload file-to-data-set CATMAP.XMI YOURID.CATMAP.XMI --binary
+```
+
+At the TSO READY prompt (or ISPF option 6), issue:
+
+```text
+RECEIVE INDATASET('YOURID.CATMAP.XMI')
+```
+
+When RECEIVE asks for restore parameters, enter:
+
+```text
+DATASET('YOURID.CATMAP.XMILIB')
+```
+
+Then execute:
+
+```text
+EX 'YOURID.CATMAP.XMILIB(INSTALL)'
+```
+
+INSTALL creates `YOURID.CATMAP.LOADLIB`, `YOURID.CATMAP.JCLLIB`, and
+`YOURID.CATMAP.SOURCE`.
+It refuses to replace existing libraries; rename those before installing.
+The run JCL and CLIST use `&SYSUID` for the load-library name. The TSO job
+input uses `SYMBOLS=EXECSYS` so symbols in CALL commands are resolved too.
+Edit the sample JOB accounting information and classes for your site.
+`RUN3J` writes FB 80 records to spool; the CLIST writes a sequential data set.
+Set the listener address and port in `RUN3N` before submitting it.
+
+The REXX source remains interpreted; the three HLASM variants are prebuilt.
+The ACF2 authorization note above still applies to the prebuilt modules.
+
+For rebuilding an installed release, customize and submit the SOURCE members
+`COMPILE3` (CATMAP3), `COMPILEJ` (CATMAP3J), and `COMPILEN` (CATMAP3N).
+They read the adjacent HLASM source members and link into the installed
+`&SYSUID..CATMAP.LOADLIB`. The matching local files are `compile_catmap3.jcl`,
+`compile_catmap3j.jcl`, and `compile_catmapn.jcl`.
+`release/package.jcl` packages populated LOADLIB, JCLLIB, and SOURCE datasets into an
+existing FB 80 XMILIB PDS (with `release/INSTALL.clist` uploaded as INSTALL),
+then creates the outer sequential XMI. The outer XMI must not already exist.
